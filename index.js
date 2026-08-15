@@ -3,32 +3,37 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1537787955144433765/wOD0TusPweqOPdIAY31U_3_psQWeQt2AbBGtZWvVd5cPyUvt8rjtDGynAZ4Wc1VrkTTw";
 
-app.get('/', (req, res) => res.status(200).send("Bot is alive")); // <-- ADD THIS
+// 1. KEEP ALIVE ROUTE FOR UPTIMEROBOT
+app.get('/', (req, res) => res.status(200).send("Bot is alive"));
 
+// 2. TEBEX WEBHOOK ROUTE
 app.post('/tebex', async (req, res) => {
-    try {
-        const data = req.body;
-        console.log("Webhook received:", data.type);
+    const data = req.body;
+    console.log("Webhook received:", data.type);
+    
+    // ANSWER TEBEX IMMEDIATELY - THIS FIXES THE VALIDATION TIMEOUT
+    res.sendStatus(200); 
 
-        // 1. LOGIN WEBHOOK
+    // PROCESS IN BACKGROUND
+    try {
+        // LOGIN WEBHOOK
         if (data.type === 'player.login') {
             const username = data.player.name;
             await axios.post(DISCORD_WEBHOOK, {
                 embeds: [{
                     title: "✅ Player Logged In",
                     description: `**${username}** just opened the store`,
-                    color: 3447003,
+                    color: 3447003, // Blue
                     timestamp: new Date()
                 }]
             });
             console.log(`Posted login for ${username}`);
-            return res.sendStatus(200);
         }
 
-        // 2. PAYMENT WEBHOOK
+        // PAYMENT WEBHOOK
         if (data.type === 'payment.completed') {
             const username = data.player.name;
             const uuid = data.player.uuid;
@@ -38,6 +43,7 @@ app.post('/tebex', async (req, res) => {
             const currency = data.currency.iso_4217;
             const txnId = data.id;
 
+            // Check Mojang for real skin. If cracked = Steve
             let avatar = `https://mc-heads.net/avatar/Steve/128`;
             let skinUrl = `https://mc-heads.net/body/Steve`;
             try {
@@ -54,9 +60,9 @@ app.post('/tebex', async (req, res) => {
                 embeds: [{
                     title: "💰 New Purchase",
                     description: `**${username}** has just made a purchase on the store.`,
-                    color: 3066993,
+                    color: 3066993, // Tebex green
                     thumbnail: { url: avatar },
-                    image: { url: skinUrl },
+                    image: { url: skinUrl }, // Full body skin
                     fields: [
                         { name: "Username", value: `\`${username}\``, inline: true },
                         { name: "Email", value: `\`${email}\``, inline: true },
@@ -70,14 +76,10 @@ app.post('/tebex', async (req, res) => {
                 }]
             });
             console.log(`Posted purchase for ${username}`);
-            return res.sendStatus(200);
         }
 
-        res.sendStatus(200);
-
     } catch (e) {
-        console.error(e);
-        res.sendStatus(500);
+        console.error("Error processing webhook:", e);
     }
 });
 
