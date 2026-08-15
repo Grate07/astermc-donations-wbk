@@ -1,0 +1,10 @@
+services:
+    - type: web
+    name: tebex-bot
+    env: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /
+    autoDeploy: true
