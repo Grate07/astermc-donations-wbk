@@ -6,10 +6,12 @@ app.use(express.json());
 const PORT = 3000;
 const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1537787955144433765/wOD0TusPweqOPdIAY31U_3_psQWeQt2AbBGtZWvVd5cPyUvt8rjtDGynAZ4Wc1VrkTTw";
 
+app.get('/', (req, res) => res.status(200).send("Bot is alive")); // <-- ADD THIS
+
 app.post('/tebex', async (req, res) => {
     try {
         const data = req.body;
-        console.log("Webhook received:", data.type); // This will show in Render logs
+        console.log("Webhook received:", data.type);
 
         // 1. LOGIN WEBHOOK
         if (data.type === 'player.login') {
@@ -18,7 +20,7 @@ app.post('/tebex', async (req, res) => {
                 embeds: [{
                     title: "✅ Player Logged In",
                     description: `**${username}** just opened the store`,
-                    color: 3447003, // Blue
+                    color: 3447003,
                     timestamp: new Date()
                 }]
             });
@@ -36,7 +38,6 @@ app.post('/tebex', async (req, res) => {
             const currency = data.currency.iso_4217;
             const txnId = data.id;
 
-            // Check Mojang for real skin. If cracked = Steve
             let avatar = `https://mc-heads.net/avatar/Steve/128`;
             let skinUrl = `https://mc-heads.net/body/Steve`;
             try {
@@ -53,9 +54,9 @@ app.post('/tebex', async (req, res) => {
                 embeds: [{
                     title: "💰 New Purchase",
                     description: `**${username}** has just made a purchase on the store.`,
-                    color: 3066993, // Tebex green
+                    color: 3066993,
                     thumbnail: { url: avatar },
-                    image: { url: skinUrl }, // Full body skin
+                    image: { url: skinUrl },
                     fields: [
                         { name: "Username", value: `\`${username}\``, inline: true },
                         { name: "Email", value: `\`${email}\``, inline: true },
@@ -71,10 +72,9 @@ app.post('/tebex', async (req, res) => {
             console.log(`Posted purchase for ${username}`);
             return res.sendStatus(200);
         }
-        
-        // If it's any other webhook type
+
         res.sendStatus(200);
-        
+
     } catch (e) {
         console.error(e);
         res.sendStatus(500);
