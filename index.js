@@ -1,86 +1,46 @@
 const express = require('express');
-const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
-const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1537787955144433765/wOD0TusPweqOPdIAY31U_3_psQWeQt2AbBGtZWvVd5cPyUvt8rjtDGynAZ4Wc1VrkTTw";
+const DISCORD_WEBHOOK = process.env.WEBHOOK_URL; // we will add in Render
 
-// 1. KEEP ALIVE ROUTE FOR UPTIMEROBOT
-app.get('/', (req, res) => res.status(200).send("Bot is alive"));
+async function isPremium(username) {
+  if (username.startsWith(".")) return false;
+  try {
+    const res = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);
+    return res.status === 200;
+  } catch { return false; }
+}
 
-// 2. TEBEX WEBHOOK ROUTE
 app.post('/tebex', async (req, res) => {
-    const data = req.body;
-    console.log("Webhook received:", data.type);
-    
-    // ANSWER TEBEX IMMEDIATELY - THIS FIXES THE VALIDATION TIMEOUT
-    res.sendStatus(200); 
+  let username = req.body.player?.name || req.body.username || "Unknown";
+  const item = req.body.packages?.[0]?.name || "Donation";
+  const cleanName = username.replace(/^\./, "");
+  const premium = await isPremium(cleanName);
+  
+  let skinUrl = premium 
+    ? `https://starlightskins.lunareclipse.studio/render/ultimate/${cleanName}/full`
+    : `https://visage.surgeplay.com/full/512/MHF_Steve.png`;
 
-    // PROCESS IN BACKGROUND
-    try {
-        // LOGIN WEBHOOK
-        if (data.type === 'player.login') {
-            const username = data.player.name;
-            await axios.post(DISCORD_WEBHOOK, {
-                embeds: [{
-                    title: "✅ Player Logged In",
-                    description: `**${username}** just opened the store`,
-                    color: 3447003, // Blue
-                    timestamp: new Date()
-                }]
-            });
-            console.log(`Posted login for ${username}`);
-        }
+  const percent = 84;
+  const bar = "█".repeat(Math.floor(percent/10)) + "░".repeat(10 - Math.floor(percent/10));
 
-        // PAYMENT WEBHOOK
-        if (data.type === 'payment.completed') {
-            const username = data.player.name;
-            const uuid = data.player.uuid;
-            const email = data.player.email;
-            const items = data.basket.basket_items;
-            const price = data.amount;
-            const currency = data.currency.iso_4217;
-            const txnId = data.id;
-
-            // Check Mojang for real skin. If cracked = Steve
-            let avatar = `https://mc-heads.net/avatar/Steve/128`;
-            let skinUrl = `https://mc-heads.net/body/Steve`;
-            try {
-                await axios.get(`https://api.mojang.com/users/profiles/minecraft/${username}`, {timeout: 2000});
-                avatar = `https://mc-heads.net/avatar/${username}/128`;
-                skinUrl = `https://mc-heads.net/body/${username}`;
-            } catch {}
-
-            const itemList = items.map(i => `**${i.quantity}x** ${i.name}`).join('\n');
-
-            await axios.post(DISCORD_WEBHOOK, {
-                username: "Tebex Store",
-                avatar_url: avatar,
-                embeds: [{
-                    title: "💰 New Purchase",
-                    description: `**${username}** has just made a purchase on the store.`,
-                    color: 3066993, // Tebex green
-                    thumbnail: { url: avatar },
-                    image: { url: skinUrl }, // Full body skin
-                    fields: [
-                        { name: "Username", value: `\`${username}\``, inline: true },
-                        { name: "Email", value: `\`${email}\``, inline: true },
-                        { name: "UUID", value: `\`${uuid}\``, inline: false },
-                        { name: "Package(s)", value: itemList, inline: false },
-                        { name: "Amount", value: `**${price} ${currency}**`, inline: true },
-                        { name: "Transaction ID", value: `\`${txnId}\``, inline: true }
-                    ],
-                    footer: { text: "Tebex", icon_url: "https://cdn.tebex.io/webstore/favicon.ico" },
-                    timestamp: new Date()
-                }]
-            });
-            console.log(`Posted purchase for ${username}`);
-        }
-
-    } catch (e) {
-        console.error("Error processing webhook:", e);
-    }
+  await fetch(DISCORD_WEBHOOK, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      embeds: [{
+        color: 0x00FF0D,
+        title: "New Donation Received 🎉",
+        description: `**GG! ${username} has purchased ${item}**\n\n**Key All:**\n${bar} ${percent}%\n\nPurchase Ranks & Coins from our store\nhttps://store.astermc.net/`,
+        image: { url: skinUrl }
+      }]
+    })
+  });
+  res.sendStatus(200);
 });
 
-app.listen(PORT, () => console.log(`✅ Tebex Bot running on port ${PORT}`));
+app.get('/', (req,res) => res.send('Tebex Webhook is Online!'));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log('Running on ' + PORT));
