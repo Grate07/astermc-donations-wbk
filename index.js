@@ -5,26 +5,26 @@ const {
     Client,
     GatewayIntentBits,
     EmbedBuilder,
-    ChannelType
+    ChannelType,
+    Events
 } = require("discord.js");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// =========================
-// EXPRESS CONFIGURATION
-// =========================
+// ==========================
+// EXPRESS
+// ==========================
 
-// Keep raw body for Tebex signature verification
 app.use(express.json({
     verify: (req, res, buf) => {
         req.rawBody = buf;
     }
 }));
 
-// =========================
+// ==========================
 // DISCORD BOT
-// =========================
+// ==========================
 
 const client = new Client({
     intents: [
@@ -32,28 +32,32 @@ const client = new Client({
     ]
 });
 
-client.once("ready", () => {
+// Bot ready
+client.once(Events.ClientReady, (readyClient) => {
     console.log("=================================");
-    console.log(`Logged in as ${client.user.tag}`);
-    console.log("Discord bot is online!");
+    console.log(`BOT ONLINE: ${readyClient.user.tag}`);
     console.log("=================================");
 });
 
-// =========================
-// TEBEX WEBHOOK
-// =========================
+// Discord errors
+client.on("error", (error) => {
+    console.error("DISCORD CLIENT ERROR:");
+    console.error(error);
+});
+
+// ==========================
+// TEBEX WEBHOOK ENDPOINT
+// ==========================
 
 app.post("/tebex", async (req, res) => {
     try {
-
         console.log("Tebex event received!");
 
         const signature = req.headers["x-signature"];
         const secret = process.env.TEBEX_WEBHOOK_SECRET;
 
-        // Verify Tebex signature
+        // Verify signature
         if (secret && signature && req.rawBody) {
-
             const bodyHash = crypto
                 .createHash("sha256")
                 .update(req.rawBody)
@@ -65,36 +69,23 @@ app.post("/tebex", async (req, res) => {
                 .digest("hex");
 
             if (signature !== expectedSignature) {
-
                 console.log("Invalid Tebex signature!");
-
                 return res.status(401).send("Invalid signature");
             }
         }
 
-        // =========================
-        // TEBEX VALIDATION
-        // =========================
-
+        // Tebex validation
         if (req.body.type === "validation.webhook") {
-
-            console.log("Tebex webhook validation received!");
+            console.log("Tebex validation received!");
 
             return res.status(200).json({
                 id: req.body.id
             });
         }
 
-        // =========================
-        // ONLY COMPLETED PAYMENTS
-        // =========================
-
+        // Ignore events other than completed payments
         if (req.body.type !== "payment.completed") {
-
-            console.log(
-                `Ignored event: ${req.body.type}`
-            );
-
+            console.log(`Ignored event: ${req.body.type}`);
             return res.status(200).send("Event received");
         }
 
@@ -102,184 +93,111 @@ app.post("/tebex", async (req, res) => {
 
         const payment = req.body.subject;
 
-        const channelId =
-            process.env.DONATION_CHANNEL_ID;
+        const channelId = process.env.DONATION_CHANNEL_ID;
 
-        // Check channel ID
         if (!channelId) {
-
-            console.log(
-                "ERROR: DONATION_CHANNEL_ID is missing!"
-            );
-
-            return res.status(500).send(
-                "Donation channel not configured"
-            );
+            console.error("DONATION_CHANNEL_ID is missing!");
+            return res.status(500).send("Donation channel not configured");
         }
 
-        // Get Discord channel
-        const channel =
-            await client.channels.fetch(channelId);
+        // Get channel
+        const channel = await client.channels.fetch(channelId);
 
         if (
             !channel ||
             channel.type !== ChannelType.GuildText
         ) {
-
-            console.log(
-                "ERROR: Donation channel not found!"
-            );
-
-            return res.status(500).send(
-                "Channel not found"
-            );
+            console.error("Donation channel not found!");
+            return res.status(500).send("Channel not found");
         }
 
-        // =========================
-        // MINECRAFT USERNAME
-        // =========================
-
+        // Minecraft username
         const username =
             payment.customer?.username?.username ||
             payment.customer?.username ||
             "Unknown Player";
 
-        // =========================
-        // PURCHASED PACKAGES
-        // =========================
+        // Packages
+        const packages = payment.products
+            ?.map((product) => {
+                const quantity = product.quantity || 1;
+                const packageName = product.name || "Unknown Package";
 
-        const packages =
-            payment.products
-                ?.map(product => {
+                return `+ x${quantity} ${packageName}`;
+            })
+            .join("\n") || "+ Unknown Package";
 
-                    const quantity =
-                        product.quantity || 1;
-
-                    const packageName =
-                        product.name ||
-                        "Unknown Package";
-
-                    return `+ x${quantity} ${packageName}`;
-
-                })
-                .join("\n")
-            ||
-            "+ No package information";
-
-        // =========================
-        // DISCORD EMBED
-        // =========================
+        // ==========================
+        // DONATION EMBED
+        // ==========================
 
         const embed = new EmbedBuilder()
-
-            // No colour = Discord default
-
+            // No setColor = default Discord embed colour
             .setAuthor({
                 name: "🛒 Visit our Store now!"
             })
-
-            .setTitle(
-                "Thank You for your support!"
-            )
-
+            .setTitle("Thank You for your support!")
             .setDescription(
                 `\`\`\`\n${username} has supported us!\n\`\`\``
             )
-
             .addFields({
                 name: "Packages",
-                value:
-                    `\`\`\`diff\n${packages}\n\`\`\``
+                value: `\`\`\`diff\n${packages}\n\`\`\``
             });
 
-        // =========================
-        // SEND MESSAGE
-        // =========================
-
+        // Bot sends the message
         await channel.send({
             embeds: [embed]
         });
 
-        console.log(
-            `Donation message sent for ${username}`
-        );
+        console.log(`Donation message sent for ${username}`);
 
-        return res
-            .status(200)
-            .send("Success");
+        return res.status(200).send("Success");
 
     } catch (error) {
-
-        console.error(
-            "TEBEX ERROR:"
-        );
-
+        console.error("TEBEX ERROR:");
         console.error(error);
 
-        return res
-            .status(500)
-            .send("Server error");
+        return res.status(500).send("Server error");
     }
 });
 
-// =========================
-// RENDER HEALTH PAGE
-// =========================
+// ==========================
+// RENDER HOME PAGE
+// ==========================
 
 app.get("/", (req, res) => {
-
-    res.send(
-        "Discord donation bot is running!"
-    );
-
+    res.send("Discord donation bot is running!");
 });
 
-// =========================
+// ==========================
 // START WEB SERVER
-// =========================
+// ==========================
 
 app.listen(PORT, () => {
-
-    console.log(
-        `Web server running on port ${PORT}`
-    );
-
+    console.log(`Web server running on port ${PORT}`);
 });
 
-// =========================
-// DISCORD LOGIN
-// =========================
+// ==========================
+// LOGIN TO DISCORD
+// ==========================
 
-if (!process.env.DISCORD_TOKEN) {
+const token = process.env.DISCORD_TOKEN;
 
-    console.error(
-        "ERROR: DISCORD_TOKEN environment variable is missing!"
-    );
+console.log("Checking Discord token...");
 
+if (!token) {
+    console.error("ERROR: DISCORD_TOKEN environment variable is missing!");
 } else {
+    console.log("Discord token found.");
+    console.log("Attempting to connect to Discord...");
 
-    console.log(
-        "Discord token found. Attempting login..."
-    );
-
+    client.login(token)
+        .then(() => {
+            console.log("Discord login request accepted!");
+        })
+        .catch((error) => {
+            console.error("DISCORD LOGIN FAILED:");
+            console.error(error);
+        });
 }
-
-client.login(process.env.DISCORD_TOKEN)
-
-    .then(() => {
-
-        console.log(
-            "Discord login request successful!"
-        );
-
-    })
-
-    .catch((error) => {
-
-        console.error(
-            "DISCORD LOGIN ERROR:"
-        );
-
-        console.error(error);
-
-    });
