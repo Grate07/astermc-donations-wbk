@@ -1,86 +1,136 @@
-const express = require('express');
+const express = require("express");
+const crypto = require("crypto");
+
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    ChannelType
+} = require("discord.js");
+
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
 
-const DISCORD_WEBHOOK = process.env.WEBHOOK_URL;
-
-// Fix 1: Allow GET so you don't see Cannot GET
-app.get('/tebex', (req, res) => res.send('Use POST for Tebex webhook'));
-
-async function isPremium(username) {
-  if (!username || username.startsWith(".")) return false;
-  try {
-    const res = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);
-    return res.status === 200;
-  } catch { return true; } // assume premium if API down
-}
-
-app.post('/tebex', async (req, res) => {
-  // Log full type for debugging
-  console.log("Tebex Type:", req.body.type || "no-type", "Keys:", Object.keys(req.body));
-
-  // Tebex validation - correct check
-  if (req.body.type && req.body.type.toLowerCase().includes("validation")) {
-    console.log("Validation OK");
-    return res.sendStatus(200);
-  }
-
-  try {
-    // Fix 2: Tebex sends data in 3 different places
-    let username = req.body.username 
-                || req.body.player?.name 
-                || req.body.customer?.username 
-                || req.bodyign || "Unknown";
-                
-    let item = req.body.subject 
-            || req.body.packages?.[0]?.name 
-            || req.body.package?.name 
-            || "Donation";
-
-    if (!DISCORD_WEBHOOK) {
-      console.log("ERROR: WEBHOOK_URL env missing!");
-      return res.sendStatus(500);
+// Keep raw body for Tebex signature verification
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf;
     }
+}));
 
-    const cleanName = username.replace(/^\./, "");
-    const premium = await isPremium(cleanName);
-
-    // Fix 3: Use reliable skin URLs
-    let skinUrl = premium 
-      ? `https://starlightskins.lunareclipse.studio/render/ultimate/${cleanName}/full`
-      : `https://mc-heads.net/body/${cleanName}/left`;
-
-    // Fallback if dot-name or API fail
-    if (username.startsWith(".")) {
-      skinUrl = `https://visage.surgeplay.com/full/512/ec3f62a7-3f65-30f2-bbfb-becfb9d6e9b3`;
-    }
-
-    const percent = 84;
-    const bar = "█".repeat(8) + "░".repeat(2);
-
-    const discordRes = await fetch(DISCORD_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        embeds: [{
-          color: 0x00FF0D,
-          title: "New Donation Received 🎉",
-          description: `**GG! ${username} has purchased ${item}**\n\n**Key All:**\n${bar} ${percent}%\n\nPurchase Ranks & Coins from our store\nhttps://store.astermc.net/`,
-          image: { url: skinUrl }
-        }]
-      })
-    });
-
-    const text = await discordRes.text();
-    console.log("Discord status:", discordRes.status, text.slice(0,100));
-    res.sendStatus(200);
-  } catch (e) {
-    console.error("CRASH:", e);
-    res.sendStatus(500);
-  }
+// Discord bot
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds
+    ]
 });
 
-app.get('/', (req,res) => res.send('Tebex Webhook is Online!'));
+client.once("ready", () => {
+    console.log(`Logged in as ${client.user.tag}`);
+});
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log('Running on ' + PORT));
+// Tebex webhook endpoint
+app.post("/tebex", async (req, res) => {
+    try {
+        const signature = req.headers["x-signature"];
+        const secret = process.env.TEBEX_WEBHOOK_SECRET;
+
+        // Verify Tebex signature
+        if (secret && signature && req.rawBody) {
+            const bodyHash = crypto
+                .createHash("sha256")
+                .update(req.rawBody)
+                .digest("hex");
+
+            const expectedSignature = crypto
+                .createHmac("sha256", secret)
+                .update(bodyHash)
+                .digest("hex");
+
+            if (signature !== expectedSignature) {
+                console.log("Invalid Tebex signature");
+                return res.status(401).send("Invalid signature");
+            }
+        }
+
+        // Tebex endpoint validation
+        if (req.body.type === "validation.webhook") {
+            console.log("Tebex validation received");
+
+            return res.status(200).json({
+                id: req.body.id
+            });
+        }
+
+        // Only handle completed payments
+        if (req.body.type !== "payment.completed") {
+            return res.status(200).send("Event received");
+        }
+
+        const payment = req.body.subject;
+
+        const channelId = process.env.DONATION_CHANNEL_ID;
+
+        const channel = await client.channels.fetch(channelId);
+
+        if (!channel || channel.type !== ChannelType.GuildText) {
+            console.log("Donation channel not found");
+            return res.status(500).send("Channel not found");
+        }
+
+        // Minecraft username
+        const username =
+            payment.customer?.username?.username ||
+            payment.products?.[0]?.username?.username ||
+            "Unknown Player";
+
+        // Packages
+        const packages = payment.products
+            .map(product =>
+                `+ x${product.quantity} ${product.name}`
+            )
+            .join("\n");
+
+        // Embed
+        const embed = new EmbedBuilder()
+            // Default Discord embed colour
+            .setAuthor({
+                name: "🛒 Visit our Store now!"
+            })
+            .setTitle("Thank You for your support!")
+            .setDescription(
+                `\`\`\`\n${username} has supported us!\n\`\`\``
+            )
+            .addFields({
+                name: "Packages",
+                value: `\`\`\`diff\n${packages}\n\`\`\``
+            });
+
+        // Bot sends the message
+        await channel.send({
+            embeds: [embed]
+        });
+
+        console.log(
+            `Donation message sent for ${username}`
+        );
+
+        return res.status(200).send("Success");
+
+    } catch (error) {
+        console.error(error);
+        return res.status(500).send("Server error");
+    }
+});
+
+// Render needs a web server
+app.get("/", (req, res) => {
+    res.send("Discord bot is running!");
+});
+
+app.listen(PORT, () => {
+    console.log(`Web server running on port ${PORT}`);
+});
+
+// Login Discord bot
+client.login(process.env.DISCORD_TOKEN);
