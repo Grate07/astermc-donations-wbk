@@ -1,8 +1,15 @@
-const { Client, GatewayIntentBits, Events } = require("discord.js");
+const { Client, GatewayIntentBits, Events, EmbedBuilder } = require("discord.js");
 const express = require("express");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Parse Tebex JSON requests
+app.use(express.json());
+
+// ==========================
+// DISCORD BOT
+// ==========================
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
@@ -19,10 +26,6 @@ client.on(Events.Error, (error) => {
     console.error(error);
 });
 
-client.on("debug", (info) => {
-    console.log("[DISCORD DEBUG]", info);
-});
-
 console.log("Starting Discord login...");
 
 client.login(process.env.DISCORD_TOKEN)
@@ -34,10 +37,49 @@ client.login(process.env.DISCORD_TOKEN)
         console.error(error);
     });
 
-app.get("/", (req, res) => {
-    res.send("Bot service is running");
-});
+// ==========================
+// TEBEX WEBHOOK
+// ==========================
 
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Web server running on port ${PORT}`);
-});
+app.post("/tebex", async (req, res) => {
+    try {
+        console.log("Tebex event received!");
+
+        // Print event type for debugging
+        console.log("Event type:", req.body.type);
+
+        // Tebex endpoint validation
+        if (req.body.type === "validation.webhook") {
+            console.log("Tebex validation received!");
+
+            return res.status(200).json({
+                id: req.body.id
+            });
+        }
+
+        // Only continue for completed payments
+        if (req.body.type !== "payment.completed") {
+            console.log("Event ignored.");
+
+            return res.status(200).send("OK");
+        }
+
+        const payment = req.body.subject;
+
+        if (!payment) {
+            console.error("Payment data not found!");
+            return res.status(400).send("Payment data missing");
+        }
+
+        // ==========================
+        // GET MINECRAFT USERNAME
+        // ==========================
+
+        const username =
+            payment.customer?.username?.username ||
+            payment.customer?.username ||
+            "Unknown Player";
+
+        // ==========================
+        // GET PACKAGES
+        // ==========================
