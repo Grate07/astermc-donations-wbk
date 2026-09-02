@@ -1,11 +1,12 @@
 {
-  "name": "tebex-to-discord",
+  "name": "minecraft-discord-bot",
   "version": "1.0.0",
   "main": "index.js",
-  "dependencies": {
-    "express": "^4.18.2"
-  },
   "scripts": {
     "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "express": "^5.1.0"
   }
 }
